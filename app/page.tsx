@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
+import { InvestmentChart } from "@/components/InvestmentChart"
+import { getStockData, StockData } from "@/lib/stockService"
 import {
   TrendingUp,
   TrendingDown,
@@ -18,71 +19,12 @@ import {
   Headphones,
   Watch,
   Car,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react"
 
-// Mock stock data for demonstration
-const stockData = {
-  AAPL: {
-    name: "Apple Inc.",
-    currentPrice: 175.43,
-    priceHistory: [
-      { date: "2020-01", price: 77.38 },
-      { date: "2021-01", price: 132.05 },
-      { date: "2022-01", price: 174.78 },
-      { date: "2023-01", price: 144.29 },
-      { date: "2024-01", price: 185.64 },
-      { date: "2024-12", price: 175.43 },
-    ],
-  },
-  NKE: {
-    name: "Nike Inc.",
-    currentPrice: 75.12,
-    priceHistory: [
-      { date: "2020-01", price: 101.31 },
-      { date: "2021-01", price: 141.47 },
-      { date: "2022-01", price: 166.72 },
-      { date: "2023-01", price: 117.66 },
-      { date: "2024-01", price: 103.91 },
-      { date: "2024-12", price: 75.12 },
-    ],
-  },
-  MSFT: {
-    name: "Microsoft Corp.",
-    currentPrice: 415.26,
-    priceHistory: [
-      { date: "2020-01", price: 160.62 },
-      { date: "2021-01", price: 231.96 },
-      { date: "2022-01", price: 309.42 },
-      { date: "2023-01", price: 239.82 },
-      { date: "2024-01", price: 384.3 },
-      { date: "2024-12", price: 415.26 },
-    ],
-  },
-  BBY: {
-    name: "Best Buy Co.",
-    currentPrice: 88.45,
-    priceHistory: [
-      { date: "2020-01", price: 87.65 },
-      { date: "2021-01", price: 109.58 },
-      { date: "2022-01", price: 104.66 },
-      { date: "2023-01", price: 81.59 },
-      { date: "2024-01", price: 78.11 },
-      { date: "2024-12", price: 88.45 },
-    ],
-  },
-  TSLA: {
-    name: "Tesla Inc.",
-    currentPrice: 248.98,
-    priceHistory: [
-      { date: "2020-01", price: 88.6 },
-      { date: "2021-01", price: 793.61 },
-      { date: "2022-01", price: 1056.78 },
-      { date: "2023-01", price: 123.18 },
-      { date: "2024-01", price: 238.45 },
-      { date: "2024-12", price: 248.98 },
-    ],
-  },
-}
+// Stock data cache for real-time updates
+let stockDataCache: Record<string, StockData> = {}
 
 const productDatabase = [
   // Apple Products
@@ -267,6 +209,40 @@ export default function InvestmentDashboard() {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [calculations, setCalculations] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [stockData, setStockData] = useState<Record<string, StockData>>({})
+  const [lastUpdated, setLastUpdated] = useState<string>("")
+
+  // Load stock data on component mount
+  useEffect(() => {
+    loadStockData()
+  }, [])
+
+  const loadStockData = async () => {
+    setIsLoading(true)
+    try {
+      const symbols = ["AAPL", "NKE", "MSFT", "BBY", "TSLA"]
+      const stockPromises = symbols.map(symbol => getStockData(symbol))
+      const stockResults = await Promise.all(stockPromises)
+      
+      const newStockData: Record<string, StockData> = {}
+      stockResults.forEach(stock => {
+        newStockData[stock.symbol] = stock
+      })
+      
+      setStockData(newStockData)
+      stockDataCache = newStockData
+      setLastUpdated(new Date().toLocaleString())
+    } catch (error) {
+      console.error("Error loading stock data:", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const refreshStockData = async () => {
+    await loadStockData()
+  }
 
   const filteredProducts = useMemo(() => {
     if (!searchQuery) return productDatabase.slice(0, 12) // Show first 12 products by default
@@ -275,12 +251,17 @@ export default function InvestmentDashboard() {
       (product) =>
         product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         product.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        stockData[product.company as keyof typeof stockData].name.toLowerCase().includes(searchQuery.toLowerCase()),
+        (stockData[product.company]?.name || "").toLowerCase().includes(searchQuery.toLowerCase()),
     )
-  }, [searchQuery])
+  }, [searchQuery, stockData])
 
   const calculateInvestment = (product: any) => {
-    const company = stockData[product.company as keyof typeof stockData]
+    const company = stockData[product.company]
+    if (!company) {
+      console.error(`No stock data available for ${product.company}`)
+      return
+    }
+
     const price = product.msrp
     const date = new Date(product.releaseDate)
 
@@ -351,6 +332,30 @@ export default function InvestmentDashboard() {
             Search for any product and discover what your purchase could have been worth if you had invested in the
             company's stock instead.
           </p>
+          
+          {/* Data Status */}
+          <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              {isLoading ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              )}
+              <span>
+                {isLoading ? "Updating stock data..." : `Last updated: ${lastUpdated || "Never"}`}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshStockData}
+              disabled={isLoading}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+              Refresh Data
+            </Button>
+          </div>
         </div>
 
         <Card>
@@ -377,22 +382,34 @@ export default function InvestmentDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-h-96 overflow-y-auto">
               {filteredProducts.map((product) => {
                 const Icon = product.icon
-                const company = stockData[product.company as keyof typeof stockData]
+                const company = stockData[product.company]
+                const hasStockData = !!company
+                
                 return (
                   <Button
                     key={product.id}
                     variant="outline"
-                    className="h-auto p-4 flex flex-col items-center gap-2 bg-transparent hover:bg-muted/50"
-                    onClick={() => calculateInvestment(product)}
+                    className={`h-auto p-4 flex flex-col items-center gap-2 bg-transparent hover:bg-muted/50 ${
+                      !hasStockData ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    onClick={() => hasStockData && calculateInvestment(product)}
+                    disabled={!hasStockData}
                   >
                     <Icon className="h-6 w-6 text-primary" />
                     <div className="text-center">
                       <div className="font-semibold text-sm">{product.name}</div>
-                      <div className="text-xs text-muted-foreground">{company.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {company?.name || "Loading..."}
+                      </div>
                       <div className="text-sm font-medium">${product.msrp.toLocaleString()}</div>
                       <div className="text-xs text-muted-foreground">
                         Released: {new Date(product.releaseDate).toLocaleDateString()}
                       </div>
+                      {hasStockData && (
+                        <div className="text-xs text-green-600 font-medium">
+                          ${company.currentPrice.toFixed(2)}
+                        </div>
+                      )}
                     </div>
                   </Button>
                 )
@@ -483,88 +500,33 @@ export default function InvestmentDashboard() {
             </div>
 
             {/* Chart */}
-            <Card className="bg-gradient-to-br from-background to-muted/20">
-              <CardHeader>
-                <CardTitle className="text-xl font-semibold">Investment Growth Over Time</CardTitle>
-                <CardDescription className="text-base">
-                  How your ${Number(calculations.originalInvestment).toLocaleString()} investment would have grown since{" "}
-                  {new Date(calculations.releaseDate).toLocaleDateString()}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-80 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={calculations.chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted-foreground))" opacity={0.3} />
-                      <XAxis
-                        dataKey="date"
-                        stroke="hsl(var(--muted-foreground))"
-                        fontSize={12}
-                        tickLine={false}
-                        axisLine={false}
-                      />
-                      <YAxis
-                        stroke="hsl(var(--muted-foreground))"
-                        fontSize={12}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--background))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
-                        }}
-                        formatter={(value) => [`$${Number(value).toLocaleString()}`, "Investment Value"]}
-                        labelFormatter={(label) => `${label}`}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="investmentValue"
-                        stroke="hsl(var(--primary))"
-                        strokeWidth={3}
-                        dot={{
-                          fill: "hsl(var(--primary))",
-                          strokeWidth: 2,
-                          stroke: "hsl(var(--background))",
-                          r: 4,
-                        }}
-                        activeDot={{
-                          r: 6,
-                          fill: "hsl(var(--primary))",
-                          stroke: "hsl(var(--background))",
-                          strokeWidth: 2,
-                        }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="flex justify-between items-center mt-4 pt-4 border-t text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-primary"></div>
-                    <span>Purchase Date: {new Date(calculations.releaseDate).toLocaleDateString()}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>Current Date: {new Date().toLocaleDateString()}</span>
-                    <div className="w-3 h-3 rounded-full bg-primary"></div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <InvestmentChart
+              chartData={calculations.chartData}
+              originalInvestment={Number(calculations.originalInvestment)}
+              currentValue={Number(calculations.currentValue)}
+              releaseDate={calculations.releaseDate}
+              productName={calculations.productName}
+              companyName={calculations.company}
+            />
           </div>
         )}
 
         {/* Footer */}
         <Card>
           <CardContent className="pt-6">
-            <div className="text-center text-sm text-muted-foreground">
+            <div className="text-center text-sm text-muted-foreground space-y-2">
               <p>
-                This tool uses historical stock data for educational purposes. Past performance does not guarantee
-                future results. Always consult with a financial advisor before making investment decisions.
+                This tool uses real-time and historical stock data for educational purposes. 
+                Data is fetched from Yahoo Finance and cached for 5 minutes to improve performance.
               </p>
+              <p>
+                Past performance does not guarantee future results. Always consult with a financial advisor before making investment decisions.
+              </p>
+              {lastUpdated && (
+                <p className="text-xs">
+                  Stock data last updated: {lastUpdated}
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
