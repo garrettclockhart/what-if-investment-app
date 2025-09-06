@@ -12,10 +12,6 @@ export interface StockData {
   lastUpdated: string;
 }
 
-// Free stock API endpoints (no API key required)
-const ALPHA_VANTAGE_BASE = 'https://www.alphavantage.co/query';
-const YAHOO_FINANCE_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
-
 // Fallback mock data for when APIs are unavailable
 const mockStockData: Record<string, StockData> = {
   AAPL: {
@@ -137,47 +133,7 @@ function generateDetailedHistory(baseHistory: StockPrice[]): StockPrice[] {
   return detailedHistory;
 }
 
-// Fetch current stock price from Yahoo Finance
-async function fetchCurrentPrice(symbol: string): Promise<number | null> {
-  try {
-    const response = await fetch(`${YAHOO_FINANCE_BASE}/${symbol}?interval=1d&range=1d`);
-    const data = await response.json();
-    
-    if (data.chart?.result?.[0]?.meta?.regularMarketPrice) {
-      return data.chart.result[0].meta.regularMarketPrice;
-    }
-    
-    return null;
-  } catch (error) {
-    console.warn(`Failed to fetch current price for ${symbol}:`, error);
-    return null;
-  }
-}
-
-// Fetch historical data from Yahoo Finance
-async function fetchHistoricalData(symbol: string): Promise<StockPrice[]> {
-  try {
-    const response = await fetch(`${YAHOO_FINANCE_BASE}/${symbol}?interval=1mo&range=5y`);
-    const data = await response.json();
-    
-    if (data.chart?.result?.[0]?.timestamp && data.chart?.result?.[0]?.indicators?.quote?.[0]?.close) {
-      const timestamps = data.chart.result[0].timestamp;
-      const prices = data.chart.result[0].indicators.quote[0].close;
-      
-      return timestamps.map((timestamp: number, index: number) => ({
-        date: new Date(timestamp * 1000).toISOString().slice(0, 7), // YYYY-MM format
-        price: Math.round(prices[index] * 100) / 100
-      })).filter((item: StockPrice) => item.price !== null);
-    }
-    
-    return [];
-  } catch (error) {
-    console.warn(`Failed to fetch historical data for ${symbol}:`, error);
-    return [];
-  }
-}
-
-// Main function to get stock data
+// Main function to get stock data using our API route
 export async function getStockData(symbol: string): Promise<StockData> {
   // Check cache first
   const cached = stockCache.get(symbol);
@@ -186,22 +142,12 @@ export async function getStockData(symbol: string): Promise<StockData> {
   }
 
   try {
-    // Try to fetch real-time data
-    const [currentPrice, historicalData] = await Promise.all([
-      fetchCurrentPrice(symbol),
-      fetchHistoricalData(symbol)
-    ]);
-
-    // If we got real data, use it
-    if (currentPrice && historicalData.length > 0) {
-      const stockData: StockData = {
-        symbol,
-        name: mockStockData[symbol]?.name || `${symbol} Inc.`,
-        currentPrice,
-        priceHistory: generateDetailedHistory(historicalData),
-        lastUpdated: new Date().toISOString(),
-      };
-
+    // Fetch data from our API route
+    const response = await fetch(`/api/stocks/${symbol}`);
+    
+    if (response.ok) {
+      const stockData: StockData = await response.json();
+      
       // Cache the result
       stockCache.set(symbol, { data: stockData, timestamp: Date.now() });
       
